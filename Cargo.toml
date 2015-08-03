@@ -1,0 +1,9 @@
+[package]
+name = "muun"
+version = "0.1.0"
+authors = ["Harukao <mk2@mk2.red>"]
+
+[dependencies]
+log = "*"
+docopt = "*"
+rustc-serialize = "*"
