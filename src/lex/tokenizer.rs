@@ -254,6 +254,7 @@ impl<'a> Tokenizer<'a> {
 
             "+" => Kind::Plus,
             "-" => Kind::Minus,
+            "*" => Kind::Multi,
             "<" => Kind::Less,
             "<=" => Kind::LessEqual,
             ">" => Kind::Greater,

@@ -33,6 +33,8 @@ use super::ast::tree::Node;
 use super::ast::expr::Expr;
 use super::ast::stmt::Stmt;
 
+static UNAOP_PRIORITY : i8 = 8;
+
 /// Parser Result Error Enums
 ///
 
@@ -338,23 +340,21 @@ impl<'a> Parser<'a> {
 
         let mut expr = Expr::new();
 
-        try!(self.parse_sub_expr(&mut expr));
+        try!(self.parse_sub_expr(&mut expr, 0));
 
         Ok(ParsePayload::Expr(expr))
     }
 
-    fn parse_sub_expr(&mut self, expr: &mut Expr) -> ParseResult<'a> {
+    fn parse_sub_expr(&mut self, expr: &mut Expr, priority_limit: i8) -> ParseResult<'a> {
 
         let mut sub_expr: Expr;
 
-        let mut first_expr: Expr;
-
         if let Ok(ParsePayload::Kind(ref kind)) = self.parse_unaop_expr() {
-            first_expr = Expr::UnaOpExpr(kind.clone(), Box::new(Expr::EmptyExpr));
-            try!(self.parse_sub_expr(&mut first_expr));
+            let mut first_expr = Expr::UnaOpExpr(kind.clone(), Box::new(Expr::EmptyExpr));
+            try!(self.parse_sub_expr(&mut first_expr, UNAOP_PRIORITY));
             sub_expr = first_expr;
         } else {
-            first_expr = match try!(self.parse_simple_expr()) {
+            let mut first_expr = match try!(self.parse_simple_expr()) {
                 ParsePayload::Expr(expr) => expr,
                 _ => Expr::EmptyExpr,
             };
@@ -362,9 +362,23 @@ impl<'a> Parser<'a> {
         }
 
         while let Ok(ParsePayload::Kind(ref kind)) = self.parse_binop_expr() {
-            let mut binaop_expr = Expr::BinOpExpr{ op:kind.clone(), lhs:Box::new(sub_expr.clone()), rhs:Box::new(Expr::EmptyExpr) };
-            try!(self.parse_sub_expr(&mut binaop_expr));
-            sub_expr = binaop_expr;
+            let (left_priority, right_priority) = self.get_binop_priority(kind);
+
+            if left_priority > priority_limit {
+                // left associative
+                let mut left_binop_expr = Expr::BinOpExpr{ op:kind.clone(), lhs:Box::new(sub_expr.clone()), rhs:Box::new(Expr::EmptyExpr) };
+                let mut right_binop_expr = Expr::BinOpExpr{ op:kind.clone(), lhs:Box::new(Expr::EmptyExpr), rhs:Box::new(Expr::EmptyExpr) };
+                try!(self.parse_sub_expr(&mut right_binop_expr, right_priority));
+                right_binop_expr.set_lhs(&left_binop_expr);
+                sub_expr = right_binop_expr;
+            } else {
+                // right associative
+                let mut left_binop_expr = Expr::BinOpExpr{ op:kind.clone(), lhs:Box::new(sub_expr.clone()), rhs:Box::new(Expr::EmptyExpr) };
+                let mut right_binop_expr = Expr::BinOpExpr{ op:kind.clone(), lhs:Box::new(sub_expr.clone()), rhs:Box::new(Expr::EmptyExpr) };
+                try!(self.parse_sub_expr(&mut right_binop_expr, right_priority));
+                left_binop_expr.set_rhs(&right_binop_expr);
+                sub_expr = left_binop_expr;
+            }
         }
 
         expr.set(&sub_expr);
@@ -410,13 +424,18 @@ impl<'a> Parser<'a> {
                 }
             },
 
-            Token{kind:Kind::Nil,value:Some(_),place:_} => {
+            Token{kind:Kind::Nil,value:None,place:_} => {
                 let expr = Expr::NilExpr;
                 return Ok(ParsePayload::Expr(expr));
             },
 
-            Token{kind:Kind::True,value:Some(_),place:_} => {
-                let expr = Expr::NilExpr;
+            Token{kind:Kind::True,value:None,place:_} => {
+                let expr = Expr::TrueExpr;
+                return Ok(ParsePayload::Expr(expr));
+            },
+
+            Token{kind:Kind::False,value:None,place:_} => {
+                let expr = Expr::FalseExpr;
                 return Ok(ParsePayload::Expr(expr));
             };
 
@@ -437,9 +456,51 @@ impl<'a> Parser<'a> {
 
         assert_any_lookaheads!(self,
             Kind::Plus, Kind::Minus, Kind::Multi, Kind::Divide, Kind::Remain, Kind::Pow, Kind::And, Kind::Or,
-            Kind::NotEqual, Kind::GreaterEqual, Kind::Greater, Kind::LessEqual, Kind::Less);
+            Kind::NotEqual, Kind::GreaterEqual, Kind::Greater, Kind::LessEqual, Kind::Less, Kind::Equal);
 
         Err(ParseError::NotFoundExpectedTokens("binary operators"))
+    }
+
+    #[inline]
+    fn get_binop_priority(&self, kind: &Kind) -> (i8, i8) {
+
+        match *kind {
+
+            Kind::Plus => (6, 6),
+
+            Kind::Minus => (6, 6),
+
+            Kind::Multi => (7, 7),
+
+            Kind::Divide => (7, 7),
+
+            Kind::Remain => (7, 7),
+
+            /// right associative, 1 ^ ( 10 ^ 9 )
+            Kind::Pow => (10, 9),
+
+            /// right associative, 1 ^ ( 10 ^ 9 )
+            Kind::Ddot => (5, 4),
+
+            Kind::Equal => (3, 3),
+
+            Kind::Greater => (3, 3),
+
+            Kind::GreaterEqual => (3, 3),
+
+            Kind::NotEqual => (3, 3),
+
+            Kind::LessEqual => (3, 3),
+
+            Kind::Less => (3, 3),
+
+            Kind::And => (2, 2),
+
+            Kind::Or => (1, 1),
+
+            _ => (0, 0),
+
+        }
     }
 
 }
@@ -464,7 +525,7 @@ mod tests {
     #[test]
     fn test_fun_expr() {
 
-        let mut parser = new_parser("true + `test`");
+        let mut parser = new_parser("1 + 2 * 3");
         let expr = parser.parse_expr();
 
         println!("expr: {:?}", expr);
