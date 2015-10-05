@@ -345,6 +345,7 @@ impl<'a> Parser<'a> {
         Ok(ParsePayload::Expr(expr))
     }
 
+    /// parse_sub_expr is uncompleted
     fn parse_sub_expr(&mut self, expr: &mut Expr, priority_limit: i8) -> ParseResult<'a> {
 
         let mut sub_expr: Expr;
@@ -525,7 +526,7 @@ mod tests {
     #[test]
     fn test_fun_expr() {
 
-        let mut parser = new_parser("1 + 2 * 3");
+        let mut parser = new_parser("1 + 2 * 3 - 1");
         let expr = parser.parse_expr();
 
         println!("expr: {:?}", expr);
